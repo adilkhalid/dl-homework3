@@ -6,6 +6,7 @@ import numpy as np
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from . import road_transforms
+from .road_transforms import RandomBrightnessContrast, AddGaussianNoise, SimpleColorJitter, RandomRotation
 from .road_utils import Track
 
 
@@ -15,9 +16,9 @@ class RoadDataset(Dataset):
     """
 
     def __init__(
-        self,
-        episode_path: str,
-        transform_pipeline: str = "default",
+            self,
+            episode_path: str,
+            transform_pipeline: str = "default",
     ):
         super().__init__()
 
@@ -41,16 +42,18 @@ class RoadDataset(Dataset):
                 ]
             )
         elif transform_pipeline == "aug":
-            xform = road_transforms.Compose(
-                [
-                    road_transforms.ImageLoader(self.episode_path),
-                    road_transforms.DepthLoader(self.episode_path),
-                    road_transforms.TrackProcessor(self.track),
-                    road_transforms.RandomHorizontalFlip(p=0.5),
-                    # You can add more augmentations here
-                ]
-            )
+            xform = road_transforms.Compose([
+                road_transforms.ImageLoader(self.episode_path),
+                road_transforms.DepthLoader(self.episode_path),
+                road_transforms.TrackProcessor(self.track),
 
+                # Custom augmentations
+                road_transforms.RandomHorizontalFlip(p=0.5),
+                RandomBrightnessContrast(brightness=0.2, contrast=0.2),
+                AddGaussianNoise(mean=0.0, std=0.01),
+                RandomRotation(max_angle=5),
+                SimpleColorJitter(jitter=0.1),
+            ])
         if xform is None:
             raise ValueError(f"Invalid transform {transform_pipeline} specified!")
 
@@ -76,12 +79,12 @@ class RoadDataset(Dataset):
 
 
 def load_data(
-    dataset_path: str,
-    transform_pipeline: str = "default",
-    return_dataloader: bool = True,
-    num_workers: int = 2,
-    batch_size: int = 32,
-    shuffle: bool = False,
+        dataset_path: str,
+        transform_pipeline: str = "default",
+        return_dataloader: bool = True,
+        num_workers: int = 2,
+        batch_size: int = 32,
+        shuffle: bool = False,
 ) -> DataLoader | Dataset:
     """
     Constructs the dataset/dataloader.

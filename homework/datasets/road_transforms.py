@@ -5,7 +5,7 @@ Design pattern of these transforms:
 3. Process the inputs
 4. Add new data to the sample
 """
-
+import random
 from pathlib import Path
 
 import cv2
@@ -117,5 +117,59 @@ class TrackProcessor:
         rasterize_lines(track_right, track, color=2)
 
         sample["track"] = track.astype(np.int64)
+
+        return sample
+
+
+class RandomBrightnessContrast:
+    def __init__(self, brightness=0.2, contrast=0.2):
+        self.brightness = brightness
+        self.contrast = contrast
+
+    def __call__(self, sample: dict):
+        factor_brightness = 1 + (random.uniform(-self.brightness, self.brightness))
+        factor_contrast = 1 + (random.uniform(-self.contrast, self.contrast))
+
+        sample["image"] = np.clip(factor_contrast * sample["image"] * factor_brightness, 0, 1).astype(np.float32)
+        return sample
+
+
+class AddGaussianNoise:
+    def __init__(self, mean=0.0, std=0.01):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, sample: dict):
+        noise = np.random.normal(self.mean, self.std, sample["image"].shape)
+        sample["image"] = np.clip(sample["image"] + noise, 0, 1).astype(np.float32)
+        return sample
+
+
+class RandomRotation:
+    def __init__(self, max_angle=5):
+        self.max_angle = max_angle
+
+    def __call__(self, sample: dict):
+        angle = random.uniform(-self.max_angle, self.max_angle)
+        h, w = sample["image"].shape[1:]
+
+        # Rotate image and depth using cv2 (rotation needs to be done for each layer individually)
+        M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1)
+        sample["image"] = np.stack([cv2.warpAffine(sample["image"][i], M, (w, h)) for i in range(3)], axis=0)
+        sample["depth"] = cv2.warpAffine(sample["depth"], M, (w, h))
+        sample["track"] = cv2.warpAffine(sample["track"], M, (w, h), flags=cv2.INTER_NEAREST)
+
+        return sample
+
+
+class SimpleColorJitter:
+    def __init__(self, jitter=0.1):
+        self.jitter = jitter
+
+    def __call__(self, sample: dict):
+        # Slightly adjust color channels independently to simulate color jitter
+        for i in range(3):
+            jitter_value = random.uniform(-self.jitter, self.jitter)
+            sample["image"][i] = np.clip(sample["image"][i] + jitter_value, 0, 1)
 
         return sample

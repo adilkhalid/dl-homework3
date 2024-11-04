@@ -8,8 +8,7 @@ from homework.models import HOMEWORK_DIR, save_model, Detector
 
 # Training Function
 def train(
-        num_epochs=10,
-        learning_rate=1e-3,
+        num_epochs=35,
         batch_size=32,
         train_data_path="../road_data/train",
         val_data_path="../road_data/val",
@@ -23,8 +22,8 @@ def train(
     val_loader = load_data(val_data_path, transform_pipeline="default", return_dataloader=True, batch_size=batch_size, shuffle=False)
 
     segmentation_loss_fn = nn.CrossEntropyLoss()
-    depth_loss_fn = nn.L1Loss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    depth_loss_fn = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=.01)
 
     # Initialize metrics
     best_miou = 0.0
@@ -37,7 +36,7 @@ def train(
         # Training loop
         for batch in train_loader:
             images = batch['image'].to(device)
-            seg_labels = batch['track'].to(device)
+            seg_labels = batch['track'].to(device).long()
             depth_labels = batch['depth'].to(device)
 
             optimizer.zero_grad()
@@ -51,7 +50,7 @@ def train(
             depth_loss = depth_loss_fn(depth_preds.squeeze(1), depth_labels)
 
             # Combine losses
-            loss = seg_loss + 0.5 * depth_loss
+            loss = seg_loss + depth_loss
 
             loss.backward()
             optimizer.step()
@@ -64,7 +63,7 @@ def train(
         with torch.no_grad():
             for batch in val_loader:
                 images = batch['image'].to(device)
-                seg_labels = batch['track'].to(device)
+                seg_labels = batch['track'].to(device).long()
                 depth_labels = batch['depth'].to(device)
 
                 seg_logits, depth_pred = model(images)

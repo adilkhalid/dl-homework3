@@ -75,7 +75,6 @@ class Classifier(nn.Module):
         return self(x).argmax(dim=1)
 
 
-
 import torch.nn.functional as F
 
 import torch
@@ -86,70 +85,120 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class AttentionBlock(nn.Module):
+    def __init__(self, in_channels):
+        super(AttentionBlock, self).__init__()
+        self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
 
+    def forward(self, x):
+        batch_size, C, width, height = x.size()
+        query = self.query_conv(x).view(batch_size, -1, width * height).permute(0, 2, 1)  # B x (W*H) x C
+        key = self.key_conv(x).view(batch_size, -1, width * height)  # B x C x (W*H)
+        energy = torch.bmm(query, key)  # B x (W*H) x (W*H)
+        attention = torch.softmax(energy, dim=-1)  # B x (W*H) x (W*H)
+        value = self.value_conv(x).view(batch_size, -1, width * height)  # B x C x (W*H)
 
-
+        out = torch.bmm(value, attention.permute(0, 2, 1))
+        out = out.view(batch_size, C, width, height)
+        out = self.gamma * out + x  # Residual connection
+        return out
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, kernel_size=3):
         super(ConvBlock, self).__init__()
-        padding = (kernel_size - 1) // 2  # Standard padding to maintain spatial dimensions
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.relu = nn.ReLU(inplace=True)
+        padding = (kernel_size - 1) // 2  # Maintain spatial dimensions
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
-        return self.relu(self.conv(x))
+        x = self.relu(self.conv(x))
+        return x
 
 class Detector(nn.Module):
     def __init__(self, in_channels=3, num_classes=3):
         super(Detector, self).__init__()
 
-        # Register buffers for input normalization
-        self.register_buffer("input_mean", torch.tensor([0.2788, 0.2657, 0.2629]))
-        self.register_buffer("input_std", torch.tensor([0.2064, 0.1944, 0.2252]))
+        self.register_buffer("input_mean", torch.tensor(INPUT_MEAN))
+        self.register_buffer("input_std", torch.tensor(INPUT_STD))
 
-        # Downsampling path
-        self.down1 = ConvBlock(in_channels, 16, stride=2)  # Down1: (B, 16, H/2, W/2)
-        self.down2 = ConvBlock(16, 32, stride=2)           # Down2: (B, 32, H/4, W/4)
+        # Downsampling path with 4 layers
+        self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, H/2, W/2)
+        self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, H/4, W/4)
+        self.down3 = ConvBlock(32, 64, stride=2)  # (B, 64, H/8, W/8)
+        self.down4 = ConvBlock(64, 128, stride=2)  # (B, 128, H/16, W/16)
+
+        # Bottleneck layer
+        self.bottleneck = ConvBlock(128, 256)
 
         # Upsampling path with skip connections
         self.up1 = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
-            nn.ReLU(inplace=True)  # ReLU after up-convolution
+            nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
+            nn.ReLU()
         )
         self.up2 = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
-            nn.ReLU(inplace=True)  # ReLU after up-convolution
+            nn.ConvTranspose2d(256, 64, kernel_size=2, stride=2),  # Input is 256 (128 + 128) after concatenation
+            nn.ReLU()
+        )
+        self.up3 = nn.Sequential(
+            nn.ConvTranspose2d(128, 32, kernel_size=2, stride=2),  # Input is 128 (64 + 64) after concatenation
+            nn.ReLU()
+        )
+        self.up4 = nn.Sequential(
+            nn.ConvTranspose2d(64, 16, kernel_size=2, stride=2),  # Input is 64 (32 + 32) after concatenation
+            nn.ReLU()
         )
 
-        # Output heads for segmentation and depth
-        self.segmentation_head = nn.Conv2d(16, num_classes, kernel_size=1)  # Logits: (B, num_classes, H, W)
-        self.depth_head = nn.Conv2d(16, 1, kernel_size=1)                   # Depth: (B, 1, H, W)
-        self.relu = nn.ReLU()
+        # **Add this extra upsampling layer**
+        self.up5 = nn.Sequential(
+            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
+            nn.ReLU()
+        )
+
+        # Update the output heads to match the number of input channels
+        self.segmentation_head = nn.Conv2d(16, num_classes, kernel_size=1)
+        self.depth_head = nn.Conv2d(16, 1, kernel_size=1)
 
     def forward(self, x):
         # Normalize input
         x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        # Downsampling
+        # Downsampling path
         d1 = self.down1(x)  # (B, 16, H/2, W/2)
         d2 = self.down2(d1)  # (B, 32, H/4, W/4)
+        d3 = self.down3(d2)  # (B, 64, H/8, W/8)
+        d4 = self.down4(d3)  # (B, 128, H/16, W/16)
 
-        # Upsampling with skip connections
-        u1 = self.up1(d2)  # (B, 16, H/2, W/2)
-        u1 = torch.cat((u1, d1), dim=1)  # Concatenate with d1
+        # Bottleneck
+        bottleneck = self.bottleneck(d4)  # (B, 256, H/16, W/16)
 
-        u2 = self.up2(u1)  # (B, 16, H, W)
+        # Upsampling path
+        u1 = self.up1(bottleneck)
+        u1 = torch.cat([u1, d4], dim=1)
+
+        u2 = self.up2(u1)
+        u2 = torch.cat([u2, d3], dim=1)
+
+        u3 = self.up3(u2)
+        u3 = torch.cat([u3, d2], dim=1)
+
+        u4 = self.up4(u3)
+        u4 = torch.cat([u4, d1], dim=1)
+
+        # **Apply the extra upsampling layer**
+        u5 = self.up5(u4)
 
         # Output layers
-        logits = self.segmentation_head(u2)  # (B, num_classes, H, W)
-        depth = torch.sigmoid(self.depth_head(u2))  # (B, 1, H, W)
+        logits = self.segmentation_head(u5)  # (B, num_classes, H, W)
+        depth = self.depth_head(u5)  # (B, 1, H, W)
 
         return logits, depth
+        def predict(self, x):
+            logits, raw_depth = self(x)
+            pred = logits.argmax(dim=1)
+            return pred, raw_depth
 
-    def predict(self, x):
-        logits, raw_depth = self(x)
-        pred = logits.argmax(dim=1)
-        return pred, raw_depth
 
 MODEL_FACTORY = {
     "classifier": Classifier,
