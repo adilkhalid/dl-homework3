@@ -92,3 +92,15 @@ coverage.xml
 # Windows
 Thumbs.db
 ehthumbs.db
+
+/road_data
+/classification_data
+/homework/classification_data
+./road_data/
+road_data/
+classification_data/
+homework/classification_data/
+./homework/classification_data/
+./classification_data/
+
+*.th
