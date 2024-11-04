@@ -202,7 +202,8 @@ class Detector(nn.Module):
     def predict(self, x):
         logits, raw_depth = self(x)
         pred = logits.argmax(dim=1)
-        return pred, raw_depth
+        depth = raw_depth.squeeze(1)  # Remove the channel dimension
+        return pred, depth
 
 
 MODEL_FACTORY = {

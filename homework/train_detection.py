@@ -8,7 +8,7 @@ from homework.models import HOMEWORK_DIR, save_model, Detector
 
 # Training Function
 def train(
-        num_epochs=35,
+        num_epochs=40,
         batch_size=32,
         train_data_path="../road_data/train",
         val_data_path="../road_data/val",
@@ -23,7 +23,7 @@ def train(
 
     segmentation_loss_fn = nn.CrossEntropyLoss()
     depth_loss_fn = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=.01)
+    optimizer = optim.Adam(model.parameters(), lr=.001)
 
     # Initialize metrics
     best_miou = 0.0
