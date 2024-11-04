@@ -85,6 +85,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class AttentionBlock(nn.Module):
     def __init__(self, in_channels):
         super(AttentionBlock, self).__init__()
@@ -105,6 +106,8 @@ class AttentionBlock(nn.Module):
         out = out.view(batch_size, C, width, height)
         out = self.gamma * out + x  # Residual connection
         return out
+
+
 class ConvBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, kernel_size=3):
         super(ConvBlock, self).__init__()
@@ -115,6 +118,7 @@ class ConvBlock(nn.Module):
     def forward(self, x):
         x = self.relu(self.conv(x))
         return x
+
 
 class Detector(nn.Module):
     def __init__(self, in_channels=3, num_classes=3):
@@ -194,10 +198,11 @@ class Detector(nn.Module):
         depth = self.depth_head(u5)  # (B, 1, H, W)
 
         return logits, depth
-        def predict(self, x):
-            logits, raw_depth = self(x)
-            pred = logits.argmax(dim=1)
-            return pred, raw_depth
+
+    def predict(self, x):
+        logits, raw_depth = self(x)
+        pred = logits.argmax(dim=1)
+        return pred, raw_depth
 
 
 MODEL_FACTORY = {
